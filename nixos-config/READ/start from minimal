@@ -1,0 +1,91 @@
+Here is the updated step-by-step process for a fresh NixOS install using your GitHub repository, configured specifically for Btrfs with standard subvolumes (root, home, and nix) to allow for easy snapshots. [1] 
+## 1. Partition, Format, and Mount Disks (Btrfs Layout)
+Boot into the live ISO, open a terminal, and prepare your drive (assuming /dev/nvme0n1—adjust to your actual drive name). [2] 
+
+* Partition the drive:
+Run cfdisk /dev/nvme0n1. Create a GPT partition table with:
+* A 512MB–1GB EFI partition (type: EFI System).
+   * A Root partition using the remaining space (type: Linux filesystem). [3, 4] 
+* Format the partitions:
+
+mkfs.vfat -F 32 -n boot /dev/nvme0n1p1
+mkfs.btrfs -L nixos /dev/nvme0n1p2
+
+* Create and mount Btrfs subvolumes:
+Mount the main Btrfs partition temporarily to create your subvolume structure:
+
+mount /dev/nvme0n1p2 /mnt
+btrfs subvolume create /mnt/@
+btrfs subvolume create /mnt/@home
+btrfs subvolume create /mnt/@nix
+umount /mnt
+
+[5, 6] 
+* Mount subvolumes with optimization flags:
+Mount your new subvolumes into their proper relative directories under /mnt:
+
+# Mount root subvolume
+mount -o subvol=@,compress=zstd,noatime /dev/nvme0n1p2 /mnt
+# Create directories for other mounts
+mkdir -p /mnt/{home,nix,boot}
+# Mount home and nix subvolumes
+mount -o subvol=@home,compress=zstd,noatime /dev/nvme0n1p2 /mnt/home
+mount -o subvol=@nix,compress=zstd,noatime /dev/nvme0n1p2 /mnt/nix
+# Mount the EFI boot partition
+mount /dev/nvme0n1p1 /mnt/boot
+
+[7] 
+
+## 2. Generate the Hardware Configuration
+NixOS will automatically scan your subvolume setup and write the correct mount options into the configuration.
+
+* Run the generation command:
+
+nixos-generate-config --root /mnt
+
+* This creates hardware-configuration.nix inside /mnt/etc/nixos/. You can safely ignore or delete the auto-generated configuration.nix.
+
+## 3. Clone Your GitHub Repository
+
+* Move into the installation configuration folder:
+
+cd /mnt/etc/nixos
+
+* Clone your configuration repository directly into this folder:
+
+git clone <your-github-repo-url> .
+
+(Note the . at the end to clone files directly into the current directory).
+
+## 4. Integrate and Stage the Hardware File
+
+* Verify flake.nix: Ensure your target nixosSystem modules list includes ./hardware-configuration.nix.
+* Stage the file in Git: Nix flakes strictly ignore untracked files. Because the hardware configuration is brand new, you must tell Git about it, or the installer will act like it does not exist:
+
+git add hardware-configuration.nix
+
+
+## 5. Install NixOS
+
+* Run the installation script pointing directly to your flake and specific hostname:
+
+nixos-install --flake .#<your-hostname>
+
+Replace <your-hostname> with the specific attribute name defined under nixosConfigurations in your flake.nix.
+
+## 6. Reboot
+
+* Set a root password if prompted, unmount the drives, and reboot:
+
+reboot
+
+
+Would you like help setting up automatic Btrfs scrubbing or snapshot tools (like Snapper or btrbk) inside your configuration files before you deploy?
+
+[1] [https://mt-caret.github.io](https://mt-caret.github.io/blog/posts/2020-06-29-optin-state.html)
+[2] [https://askubuntu.com](https://askubuntu.com/questions/1535744/wrangling-a-new-installation-gone-awry-installed-on-external-drive)
+[3] [https://ramsdenj.com](https://ramsdenj.com/posts/2016-04-05-using-btrfs-for-easy-backup-and-rollback/)
+[4] [https://wiki.gentoo.org](https://wiki.gentoo.org/wiki/Full_Encrypted_Btrfs/Native_System_Root_Guide)
+[5] [https://discussion.fedoraproject.org](https://discussion.fedoraproject.org/t/btrfs-snapshot-move-to-usb-attached-btrfs-formatted-hard-drive/73045)
+[6] [https://askubuntu.com](https://askubuntu.com/questions/124075/how-to-make-a-btrfs-snapshot)
+[7] [https://discussion.fedoraproject.org](https://discussion.fedoraproject.org/t/btrfs-snapshot-move-to-usb-attached-btrfs-formatted-hard-drive/73045)
